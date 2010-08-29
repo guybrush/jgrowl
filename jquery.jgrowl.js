@@ -19,6 +19,10 @@
  * - Added themeState option to control 'highlight' or 'error' for jQuery UI
  * - Ammended some CSS to provide default positioning for nested usage.
  * - Changed some CSS to be prefixed with jGrowl- to prevent namespacing issues
+ * - Added two new options - openDuration and closeDuration to allow 
+ *   better control of notification open and close speeds, respectively 
+ *   Patch contributed by Jesse Vincet.
+ * - Added afterOpen callback.  Patch contributed by Russel Branca.
  *
  * Changes in 1.2.4
  * - Fixed IE bug with the close-all button
@@ -150,13 +154,15 @@
 			corners: 		'10px',
 			check: 			250,
 			life: 			3000,
-			speed: 			'normal',
+			closeDuration:  'normal',
+			openDuration:   'normal',
 			easing: 		'swing',
 			closer: 		true,
 			closeTemplate: '&times;',
 			closerTemplate: '<div>[ close all ]</div>',
 			log: 			function(e,m,o) {},
 			beforeOpen: 	function(e,m,o) {},
+			afterOpen: 		function(e,m,o) {},
 			open: 			function(e,m,o) {},
 			beforeClose: 	function(e,m,o) {},
 			close: 			function(e,m,o) {},
@@ -180,6 +186,12 @@
 		create: 	function( message , o ) {
 			var o = $.extend({}, this.defaults, o);
 
+			/* To keep backward compatibility with 1.24 and earlier, honor 'speed' if the user has set it */
+			if (typeof o.speed !== 'undefined') {
+				o.openDuration = o.speed;
+				o.closeDuration = o.speed;
+			}
+
 			this.notifications.push({ message: message , options: o });
 			
 			o.log.apply( this.element , [this.element,message,o] );
@@ -189,14 +201,17 @@
 			var self = this;
 			var message = notification.message;
 			var o = notification.options;
-
+			var tplMessage = $('<div class="jGrowl-message"></div>').append(message);
 			var notification = $(
 				'<div class="jGrowl-notification ' + o.themeState + ' ui-corner-all' + 
 				((o.group != undefined && o.group != '') ? ' ' + o.group : '') + '">' +
 				'<div class="jGrowl-close">' + o.closeTemplate + '</div>' +
 				'<div class="jGrowl-header">' + o.header + '</div>' +
-				'<div class="jGrowl-message">' + message + '</div></div>'
-			).data("jGrowl", o).addClass(o.theme).children('div.jGrowl-close').bind("click.jGrowl", function() {
+				// '<div class="jGrowl-message">' + message + '</div>' +
+				'</div>'
+			);
+			notification.append(tplMessage);
+			notification.data("jGrowl", o).addClass(o.theme).children('div.jGrowl-close').bind("click.jGrowl", function() {
 				$(this).parent().trigger('jGrowl.close');
 			}).parent();
 
@@ -218,21 +233,25 @@
 						$('div.jGrowl-notification:first', self.element).before(notification);
 					}
 					
-					$(this).animate(o.animateOpen, o.speed, o.easing, function() {
+					$(this).animate(o.animateOpen, o.openDuration, o.easing, function() {
 						// Fixes some anti-aliasing issues with IE filters.
 						if ($.browser.msie && (parseInt($(this).css('opacity'), 10) === 1 || parseInt($(this).css('opacity'), 10) === 0))
 							this.style.removeAttribute('filter');
 
 						$(this).data("jGrowl").created = new Date();
+						
+						$(this).trigger('jGrowl.afterOpen');
 					});
 				}
+			}).bind('jGrowl.afterOpen', function() {
+				o.afterOpen.apply( notification , [notification,message,o,self.element] );
 			}).bind('jGrowl.beforeClose', function() {
 				if ( o.beforeClose.apply( notification , [notification,message,o,self.element] ) != false )
 					$(this).trigger('jGrowl.close');
 			}).bind('jGrowl.close', function() {
 				// Pause the notification, lest during the course of animation another close event gets called.
 				$(this).data('jGrowl.pause', true);
-				$(this).animate(o.animateClose, o.speed, o.easing, function() {
+				$(this).animate(o.animateClose, o.closeDuration, o.easing, function() {
 					$(this).remove();
 					var close = o.close.apply( notification , [notification,message,o,self.element] );
 
@@ -250,7 +269,7 @@
 				$(this.defaults.closerTemplate).addClass('jGrowl-closer ui-state-highlight ui-corner-all').addClass(this.defaults.theme)
 					.appendTo(self.element).animate(this.defaults.animateOpen, this.defaults.speed, this.defaults.easing)
 					.bind("click.jGrowl", function() {
-						$(this).siblings().children('div.close').trigger("click.jGrowl");
+						$(this).siblings().trigger("jGrowl.beforeClose");
 
 						if ( $.isFunction( self.defaults.closer ) ) {
 							self.defaults.closer.apply( $(this).parent()[0] , [$(this).parent()[0]] );
